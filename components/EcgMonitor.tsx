@@ -156,11 +156,12 @@ export default function EcgMonitor({ rhythm, sync = false, shocks = 0, syncedSho
   return <section className="monitor" aria-label={hidden ? 'Unlabeled simulated ECG strip' : `${r.name} ECG`}>
     <div className="monitor-top">
       <span>LEAD II <span className="live-dot" /> {playing ? 'LIVE STRIP' : 'STRIP PAUSED'}</span>
-      <span>{sync ? '\u25BC SYNC MARKERS ON' : '25 mm/s \u00B7 10 mm/mV'}</span>
+      <span>GAIN 1.0x {'\u00B7'} 25 mm/s{sync && <b className="sync-flag"> {'\u25BC'} SYNC</b>}</span>
+      <span className="hr">HR <b>{hidden || !r.rate ? '\u2014' : r.rate}</b> bpm</span>
       <button type="button" className="strip-playback" onClick={() => setPlayOverride(!playing)} aria-label={playing ? 'Pause ECG strip' : 'Play ECG strip'}>{playing ? 'Pause strip' : 'Play strip'}</button>
     </div>
     {!playing && reduced && <p className="strip-motion-note">Reduced motion is on. Select Play strip to animate the ECG.</p>}
     <div className="ecg-paper"><canvas ref={canvas} role="img" aria-label={hidden ? 'Identify this ECG using the choices below' : `Simulated ${r.name} waveform`} /></div>
-    <div className="monitor-bottom"><span>{hidden ? 'Identify the rhythm' : r.name}</span><span className="rate">{hidden ? '\u2014' : r.rate || '\u2014'} <small>bpm</small></span></div>
+    <div className="monitor-bottom"><span className="current-rhythm"><small>CURRENT RHYTHM</small>{hidden ? 'Identify the rhythm' : r.name}</span></div>
   </section>;
 }

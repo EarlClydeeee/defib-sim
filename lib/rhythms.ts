@@ -21,6 +21,20 @@ export const postShockRhythms: Rhythm[] = [
 ];
 export const isPostShock = (id: RhythmId) => postShockRhythms.some(r => r.id === id);
 export const getRhythm = (id: RhythmId) => [...rhythms, ...postShockRhythms].find(r => r.id === id)!;
+export const energyRange: Partial<Record<RhythmId, { biphasic: string; monophasic: string }>> = {
+  svt: {biphasic:'50–100 J', monophasic:'100 J'},
+  afib: {biphasic:'120–200 J', monophasic:'200 J'},
+  flutter: {biphasic:'200 J', monophasic:'200 J'},
+  vt: {biphasic:'100 J, escalate if no response', monophasic:'100 J'},
+  pvt: {biphasic:'120–200 J (manufacturer)', monophasic:'360 J'},
+  vf: {biphasic:'120–200 J (manufacturer)', monophasic:'360 J'},
+  finevf: {biphasic:'120–200 J (manufacturer)', monophasic:'360 J'},
+};
+export const advisory = (r: Rhythm) => r.treatment === 'Defibrillate'
+  ? {badge:'SHOCKABLE', tone:'shock', mode:'Defibrillation (SYNC OFF)'}
+  : r.treatment === 'Synchronized cardioversion'
+    ? {badge:'SYNCHRONIZED CARDIOVERSION', tone:'sync', mode:'Synchronized cardioversion (SYNC ON)'}
+    : {badge:'NON-SHOCKABLE', tone:'none', mode:'No shock. Treat the patient, not the monitor.'};
 const g = (x: number, center: number, width: number, height: number) => height * Math.exp(-(((x-center)/width)**2));
 export function beatPhase(id: RhythmId, t: number) {
   const r = getRhythm(id);

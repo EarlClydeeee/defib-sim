@@ -2,10 +2,10 @@ import { getRhythm, isPostShock, type RhythmId } from './rhythms';
 export type Phase = 'idle'|'charging'|'charged'|'waitingForR'|'discharged'|'dumped';
 export type LogEntry = {at:number; text:string};
 export type Conversion = 'cardioversion'|'defibrillation';
-export type State = {rhythm:RhythmId; phase:Phase; sync:boolean; energy:number; waveform:'Biphasic'|'Monophasic'; clear:boolean[]; chargedAt:number; shocks:number; lastShockSynced:boolean; conversion:Conversion|null; log:LogEntry[]; feedback:string};
-export type Event = {type:'RHYTHM';id:RhythmId}|{type:'SYNC'}|{type:'ENERGY';value:number}|{type:'WAVEFORM';value:State['waveform']}|{type:'CLEAR';index:number}|{type:'CHARGE'|'READY'|'SHOCK'|'R_WAVE'|'DUMP'|'RECOVER'|'SETTLE';now:number}|{type:'RESET';id:RhythmId};
-export const initialState = (rhythm:RhythmId='svt'):State => ({rhythm,phase:'idle',sync:false,energy:100,waveform:'Biphasic',clear:[false,false,false],chargedAt:0,shocks:0,lastShockSynced:false,conversion:null,log:[],feedback:'Assess the patient. Choose a mode and energy, then charge.'});
-export const pauseMs = 2200, recoveryMs = 4200;
+export type State = {rhythm:RhythmId; phase:Phase; sync:boolean; energy:number; waveform:'Biphasic'|'Monophasic'; clear:boolean[]; chargingAt:number; chargedAt:number; shocks:number; lastShockSynced:boolean; conversion:Conversion|null; log:LogEntry[]; feedback:string};
+export type Event = {type:'RHYTHM';id:RhythmId}|{type:'SYNC'|'CLEAR_LOG'}|{type:'ENERGY';value:number}|{type:'WAVEFORM';value:State['waveform']}|{type:'CLEAR';index:number}|{type:'CHARGE'|'READY'|'SHOCK'|'R_WAVE'|'DUMP'|'RECOVER'|'SETTLE';now:number}|{type:'RESET';id:RhythmId};
+export const initialState = (rhythm:RhythmId='svt'):State => ({rhythm,phase:'idle',sync:false,energy:100,waveform:'Biphasic',clear:[false,false,false],chargingAt:0,chargedAt:0,shocks:0,lastShockSynced:false,conversion:null,log:[],feedback:'Assess the patient. Choose a mode and energy, then charge.'});
+export const chargeMs = 2400, pauseMs = 2200, recoveryMs = 4200;
 export function outcome(s:State):{rhythm:RhythmId;conversion:Conversion|null;text:string} {
  const r=getRhythm(s.rhythm);
  if(r.treatment==='Do not shock') return {rhythm:s.rhythm,conversion:null,text:'Inappropriate shock. '+r.note};
@@ -20,13 +20,14 @@ function discharge(s:State,now:number):State {const o=outcome(s); const text=o.t
 const log=(s:State,now:number,text:string):State=>({...s,feedback:text,log:[...s.log,{at:now,text}]});
 export function reducer(s:State,e:Event):State {
  if(e.type==='RESET')return initialState(e.id);
+ if(e.type==='CLEAR_LOG')return {...s,log:[]};
  const locked=['charging','charged','waitingForR'].includes(s.phase);
  if(e.type==='RHYTHM')return locked?s:{...initialState(e.id),log:s.log};
  if(e.type==='SYNC')return locked?s:{...s,sync:!s.sync,clear:[false,false,false]};
  if(e.type==='ENERGY')return locked || ![50,100,120,150,200,360].includes(e.value) || (e.value===360&&s.waveform==='Biphasic')?s:{...s,energy:e.value};
  if(e.type==='WAVEFORM')return locked?s:{...s,waveform:e.value,energy:e.value==='Biphasic'&&s.energy===360?200:s.energy};
  if(e.type==='CLEAR')return s.phase==='waitingForR'?s:{...s,clear:s.clear.map((v,i)=>i===e.index?!v:v)};
- if(e.type==='CHARGE')return locked||isPostShock(s.rhythm)?s:{...s,phase:'charging',clear:[false,false,false],feedback:'Charging. Confirm the team and oxygen are clear.',log:[...s.log,{at:e.now,text:`Charging to ${s.energy} J.`}]};
+ if(e.type==='CHARGE')return locked||isPostShock(s.rhythm)?s:{...s,phase:'charging',chargingAt:e.now,clear:[false,false,false],feedback:'Charging. Confirm the team and oxygen are clear.',log:[...s.log,{at:e.now,text:`Charging to ${s.energy} J.`}]};
  if(e.type==='READY')return s.phase==='charging'?{...s,phase:'charged',chargedAt:e.now,feedback:'Charged. Complete all three safety checks before discharge.'}:s;
  if(e.type==='DUMP')return locked?{...s,phase:'dumped',clear:[false,false,false],feedback:'Stored energy dumped. Reassess and recharge when ready.',log:[...s.log,{at:e.now,text:'Energy dumped; no shock delivered.'}]}:s;
  if(e.type==='SHOCK') {
