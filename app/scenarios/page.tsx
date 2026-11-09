@@ -1,0 +1,3 @@
+import Link from 'next/link';
+import {scenarios} from '@/lib/scenarios';
+export default function Scenarios(){return <><div className="page-heading"><p className="eyebrow">02 / GUIDED SCENARIOS</p><h1>A decision at the bedside.</h1><p>Six clinical cases. Assess the patient, identify the rhythm, and choose your next action.</p></div><div className="scenario-grid">{scenarios.map((s,i)=><Link className="mode-card" href={'/scenarios/'+s.id} key={s.id}><span className="card-number">0{i+1} / {s.setting}</span><h2>{s.title}</h2><p>{s.vignette}</p><strong>Begin case ?</strong></Link>)}</div></>;}
