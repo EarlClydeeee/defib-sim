@@ -22,19 +22,19 @@ export const postShockRhythms: Rhythm[] = [
 export const isPostShock = (id: RhythmId) => postShockRhythms.some(r => r.id === id);
 export const getRhythm = (id: RhythmId) => [...rhythms, ...postShockRhythms].find(r => r.id === id)!;
 export const energyRange: Partial<Record<RhythmId, { biphasic: string; monophasic: string }>> = {
-  svt: {biphasic:'50–100 J', monophasic:'100 J'},
-  afib: {biphasic:'120–200 J', monophasic:'200 J'},
-  flutter: {biphasic:'200 J', monophasic:'200 J'},
-  vt: {biphasic:'100 J, escalate if no response', monophasic:'100 J'},
+  svt: {biphasic:'100 J initially (AHA 2025)', monophasic:'100 J'},
+  afib: {biphasic:'200 J or more initially (AHA 2025)', monophasic:'200 J'},
+  flutter: {biphasic:'200 J initially (AHA 2025)', monophasic:'200 J'},
+  vt: {biphasic:'100 J initially, escalate if no response', monophasic:'100 J'},
   pvt: {biphasic:'120–200 J (manufacturer)', monophasic:'360 J'},
   vf: {biphasic:'120–200 J (manufacturer)', monophasic:'360 J'},
   finevf: {biphasic:'120–200 J (manufacturer)', monophasic:'360 J'},
 };
 export const advisory = (r: Rhythm) => r.treatment === 'Defibrillate'
-  ? {badge:'SHOCKABLE', tone:'shock', mode:'Defibrillation (SYNC OFF)'}
+  ? {badge:'SHOCKABLE', tone:'shock', mode:'Defibrillation (SYNC OFF)', prep:'Shock immediately, then resume CPR at once. No pulse check until the 2-minute rhythm check.'}
   : r.treatment === 'Synchronized cardioversion'
-    ? {badge:'SYNCHRONIZED CARDIOVERSION', tone:'sync', mode:'Synchronized cardioversion (SYNC ON)'}
-    : {badge:'NON-SHOCKABLE', tone:'none', mode:'No shock. Treat the patient, not the monitor.'};
+    ? {badge:'SYNCHRONIZED CARDIOVERSION', tone:'sync', mode:'Synchronized cardioversion (SYNC ON)', prep:'Sedate the awake patient when feasible, without delaying treatment if they are deteriorating. Confirm a sync marker on every R wave.'}
+    : {badge:'NON-SHOCKABLE', tone:'none', mode:'No shock. Treat the patient, not the monitor.', prep:r.pulse?'Assess perfusion and symptoms; follow the appropriate non-electrical pathway.':'High-quality CPR, epinephrine per protocol, and reversible causes.'};
 const g = (x: number, center: number, width: number, height: number) => height * Math.exp(-(((x-center)/width)**2));
 export function beatPhase(id: RhythmId, t: number) {
   const r = getRhythm(id);
