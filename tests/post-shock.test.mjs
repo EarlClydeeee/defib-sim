@@ -16,9 +16,7 @@ const { initialState, reducer } = loadTs('../lib/defib-machine.ts', { './rhythms
 
 function chargeAndClear(state) {
   let s = reducer(state, { type: 'CHARGE', now: 1 });
-  s = reducer(s, { type: 'READY', now: 2 });
-  for (const index of [0, 1, 2]) s = reducer(s, { type: 'CLEAR', index });
-  return s;
+  return reducer(s, { type: 'READY', now: 2 });
 }
 
 let s = reducer(initialState('svt'), { type: 'SYNC' });

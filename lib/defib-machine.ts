@@ -5,9 +5,9 @@ export type Conversion = 'cardioversion'|'defibrillation';
 export type Waveform = 'Biphasic'|'Monophasic';
 export type Shock = {rhythm:RhythmId; energy:number; waveform:Waveform; synced:boolean};
 export type Flag = 'sync-on-arrest'|'attempted-nonshockable';
-export type State = {rhythm:RhythmId; phase:Phase; sync:boolean; energy:number; waveform:Waveform; clear:boolean[]; chargingAt:number; chargedAt:number; shocks:number; lastShock:Shock|null; lastShockSynced:boolean; conversion:Conversion|null; flags:Flag[]; log:LogEntry[]; feedback:string};
-export type Event = {type:'RHYTHM';id:RhythmId}|{type:'SYNC'|'CLEAR_LOG'}|{type:'ENERGY';value:number}|{type:'WAVEFORM';value:Waveform}|{type:'CLEAR';index:number}|{type:'CHARGE'|'READY'|'SHOCK'|'R_WAVE'|'DUMP'|'RECOVER'|'SETTLE';now:number}|{type:'RESET';id:RhythmId};
-export const initialState = (rhythm:RhythmId='svt'):State => ({rhythm,phase:'idle',sync:false,energy:100,waveform:'Biphasic',clear:[false,false,false],chargingAt:0,chargedAt:0,shocks:0,lastShock:null,lastShockSynced:false,conversion:null,flags:[],log:[],feedback:'Assess the patient. Choose a mode and energy, then charge.'});
+export type State = {rhythm:RhythmId; phase:Phase; sync:boolean; energy:number; waveform:Waveform; chargingAt:number; chargedAt:number; shocks:number; lastShock:Shock|null; lastShockSynced:boolean; conversion:Conversion|null; flags:Flag[]; log:LogEntry[]; feedback:string};
+export type Event = {type:'RHYTHM';id:RhythmId}|{type:'SYNC'|'CLEAR_LOG'}|{type:'ENERGY';value:number}|{type:'WAVEFORM';value:Waveform}|{type:'CHARGE'|'READY'|'SHOCK'|'R_WAVE'|'DUMP'|'RECOVER'|'SETTLE';now:number}|{type:'RESET';id:RhythmId};
+export const initialState = (rhythm:RhythmId='svt'):State => ({rhythm,phase:'idle',sync:false,energy:100,waveform:'Biphasic',chargingAt:0,chargedAt:0,shocks:0,lastShock:null,lastShockSynced:false,conversion:null,flags:[],log:[],feedback:'Assess the patient. Choose a mode and energy, then charge.'});
 export const chargeMs = 2400, pauseMs = 2200, recoveryMs = 4200;
 export const targetEnergy = (id:RhythmId, waveform:Waveform) => { const r=getRhythm(id); return waveform==='Biphasic'?r.biphasic:r.monophasic; };
 export function outcome(s:State):{rhythm:RhythmId;conversion:Conversion|null;text:string} {
@@ -23,7 +23,7 @@ export function outcome(s:State):{rhythm:RhythmId;conversion:Conversion|null;tex
 function discharge(s:State,now:number):State {
  const o=outcome(s);
  const text=o.text+(s.sync?' SYNC has reset to OFF, as on many devices. Re-enable it and confirm a marker on every R wave before another cardioversion.':'');
- return {...s,rhythm:o.rhythm,phase:'discharged',sync:false,clear:[false,false,false],shocks:s.shocks+1,lastShock:{rhythm:s.rhythm,energy:s.energy,waveform:s.waveform,synced:s.sync},lastShockSynced:s.sync,conversion:o.conversion,feedback:text,log:[...s.log,{at:now,text:`${s.energy} J ${s.waveform}, ${s.sync?'SYNC':'UNSYNC'}: ${text}`}]};
+ return {...s,rhythm:o.rhythm,phase:'discharged',sync:false,shocks:s.shocks+1,lastShock:{rhythm:s.rhythm,energy:s.energy,waveform:s.waveform,synced:s.sync},lastShockSynced:s.sync,conversion:o.conversion,feedback:text,log:[...s.log,{at:now,text:`${s.energy} J ${s.waveform}, ${s.sync?'SYNC':'UNSYNC'}: ${text}`}]};
 }
 const log=(s:State,now:number,text:string):State=>({...s,feedback:text,log:[...s.log,{at:now,text}]});
 const flag=(s:State,f:Flag):Flag[]=>s.flags.includes(f)?s.flags:[...s.flags,f];
@@ -32,15 +32,14 @@ export function reducer(s:State,e:Event):State {
  if(e.type==='CLEAR_LOG')return {...s,log:[]};
  const locked=['charging','charged','waitingForR'].includes(s.phase);
  if(e.type==='RHYTHM')return locked?s:{...initialState(e.id),log:s.log};
- if(e.type==='SYNC')return s.phase==='charging'||s.phase==='waitingForR'?s:{...s,sync:!s.sync,clear:[false,false,false]};
+ if(e.type==='SYNC')return s.phase==='charging'||s.phase==='waitingForR'?s:{...s,sync:!s.sync};
  if(e.type==='ENERGY')return locked || ![50,100,120,150,200,360].includes(e.value) || (e.value===360&&s.waveform==='Biphasic')?s:{...s,energy:e.value};
  if(e.type==='WAVEFORM')return locked?s:{...s,waveform:e.value,energy:e.value==='Biphasic'&&s.energy===360?200:s.energy};
- if(e.type==='CLEAR')return s.phase==='waitingForR'?s:{...s,clear:s.clear.map((v,i)=>i===e.index?!v:v)};
- if(e.type==='CHARGE')return locked||isPostShock(s.rhythm)?s:{...s,phase:'charging',chargingAt:e.now,clear:[false,false,false],feedback:'Charging. Confirm the team and oxygen are clear.',log:[...s.log,{at:e.now,text:`Charging to ${s.energy} J.`}]};
- if(e.type==='READY')return s.phase==='charging'?{...s,phase:'charged',chargedAt:e.now,feedback:'Charged. Complete all three safety checks before discharge.'}:s;
- if(e.type==='DUMP')return locked?{...s,phase:'dumped',clear:[false,false,false],feedback:'Stored energy dumped. Reassess and recharge when ready.',log:[...s.log,{at:e.now,text:'Energy dumped; no shock delivered.'}]}:s;
+ if(e.type==='CHARGE')return locked||isPostShock(s.rhythm)?s:{...s,phase:'charging',chargingAt:e.now,feedback:'Charging. Call \u201CCharging, stand clear\u201D and check the team and oxygen.',log:[...s.log,{at:e.now,text:`Charging to ${s.energy} J.`}]};
+ if(e.type==='READY')return s.phase==='charging'?{...s,phase:'charged',chargedAt:e.now,feedback:'Charged. Call \u201CAll clear\u201D, look to confirm nobody is touching the patient or bed, then shock.'}:s;
+ if(e.type==='DUMP')return locked?{...s,phase:'dumped',feedback:'Stored energy dumped. Reassess and recharge when ready.',log:[...s.log,{at:e.now,text:'Energy dumped; no shock delivered.'}]}:s;
  if(e.type==='SHOCK') {
-  if(s.phase!=='charged'||!s.clear.every(Boolean))return s;
+  if(s.phase!=='charged')return s;
   const r=getRhythm(s.rhythm);
   if(s.sync&&r.treatment==='Defibrillate')return log({...s,flags:flag(s,'sync-on-arrest')},e.now,'Shock withheld: SYNC is ON, but VF and pulseless VT have no reliable R waves to synchronize to. Turn SYNC OFF and defibrillate now. Every delay lowers survival.');
   if(s.sync&&r.rate===0)return log({...s,flags:flag(s,'attempted-nonshockable')},e.now,`Shock withheld: no R waves detected. ${r.name} is not shockable. Disarm, resume CPR, and give epinephrine per protocol.`);

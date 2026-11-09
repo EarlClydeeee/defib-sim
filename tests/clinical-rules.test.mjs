@@ -25,7 +25,7 @@ const setup = (rhythm, { sync = false, energy, waveform } = {}) => {
   if (sync) s = run(s, { type: 'SYNC' });
   return s;
 };
-const charge = s => run(s, 'CHARGE', 'READY', { type: 'CLEAR', index: 0 }, { type: 'CLEAR', index: 1 }, { type: 'CLEAR', index: 2 });
+const charge = s => run(s, 'CHARGE', 'READY');
 const shock = s => { const next = run(charge(s), 'SHOCK'); return next.phase === 'waitingForR' ? run(next, 'R_WAVE') : next; };
 const grade = (rhythm, s, extra = {}) => gradeCase({ rhythm, recognition: rhythm, elapsed: 10, shock: s.lastShock, flags: s.flags, withheld: false, ...extra });
 const assertFail = (g, label) => { assert.equal(g.passed, false, `${label}: must fail`); assert.ok(g.score <= criticalCap, `${label}: score ${g.score} must be capped`); assert.ok(g.critical.length > 0, `${label}: needs a critical reason`); };
@@ -58,7 +58,7 @@ for (const id of ['pvt', 'vf']) {
   assert.equal(s.shocks, 0, `${id}: SYNC ON must not deliver a "successful" defibrillation`);
   assert.equal(s.phase, 'charged', `${id}: stays charged so the learner can correct the mode`);
   assert.match(s.feedback, /Turn SYNC OFF/);
-  const fixed = run(s, { type: 'SYNC' }, { type: 'CLEAR', index: 0 }, { type: 'CLEAR', index: 1 }, { type: 'CLEAR', index: 2 }, 'SHOCK');
+  const fixed = run(s, { type: 'SYNC' }, 'SHOCK');
   assert.equal(fixed.rhythm, 'standstill', `${id}: SYNC OFF then shock defibrillates`);
   const g = grade(id, fixed);
   assert.ok(g.passed && g.score < 100, `${id}: delayed by SYNC ON costs points (${g.score})`);
@@ -91,9 +91,9 @@ assert.match(twice.feedback, /Re-enable it and confirm a marker/);
 twice = shock(run(twice, { type: 'ENERGY', value: 200 }));
 assert.equal(twice.rhythm, 'vf', 'ERR-08: second shock without re-enabling SYNC is unsynchronized');
 
-// ERR-09: incomplete checklist blocks the shock
-const partial = run(setup('vf', { energy: 200 }), 'CHARGE', 'READY', { type: 'CLEAR', index: 0 }, 'SHOCK');
-assert.equal(partial.shocks, 0, 'ERR-09: no discharge with incomplete checklist');
+// ERR-09: the "All clear" call is an instruction, given at charge and when charged
+assert.match(run(setup('vf'), 'CHARGE').feedback, /stand clear/);
+assert.match(charge(setup('vf')).feedback, /All clear.*nobody is touching/);
 
 // ERR-10: no discharge without charging
 assert.equal(run(setup('vf', { energy: 200 }), 'SHOCK').shocks, 0, 'ERR-10: shock without charge does nothing');
