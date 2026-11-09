@@ -1,4 +1,4 @@
-export type RhythmId = 'nsr' | 'brady' | 'svt' | 'afib' | 'flutter' | 'vt' | 'pvt' | 'vf' | 'finevf' | 'asystole' | 'pea';
+export type RhythmId = 'nsr' | 'brady' | 'svt' | 'afib' | 'flutter' | 'vt' | 'pvt' | 'vf' | 'finevf' | 'asystole' | 'pea' | 'standstill' | 'recovery';
 export type Treatment = 'Defibrillate' | 'Synchronized cardioversion' | 'Do not shock';
 export type Rhythm = { id: RhythmId; name: string; rate: number; pulse: boolean; treatment: Treatment; biphasic: number; monophasic: number; note: string };
 export const rhythms: Rhythm[] = [
@@ -14,7 +14,13 @@ export const rhythms: Rhythm[] = [
   {id:'asystole',name:'Asystole',rate:0,pulse:false,treatment:'Do not shock',biphasic:0,monophasic:0,note:'Confirm leads, gain, and another lead. Start high-quality CPR, give epinephrine per protocol, and address reversible causes.'},
   {id:'pea',name:'Pulseless electrical activity',rate:65,pulse:false,treatment:'Do not shock',biphasic:0,monophasic:0,note:'Organized electrical activity without a pulse. ECG alone cannot diagnose PEA. CPR, epinephrine, and reversible causes are priorities.'},
 ];
-export const getRhythm = (id: RhythmId) => rhythms.find(r => r.id === id)!;
+// Post-shock stages: shown on the monitor after a successful shock, never offered as selectable rhythms.
+export const postShockRhythms: Rhythm[] = [
+  {id:'standstill',name:'Post-shock electrical pause',rate:0,pulse:false,treatment:'Do not shock',biphasic:0,monophasic:0,note:'The shock depolarized every myocardial cell at once, interrupting the re-entry circuit. All electrical activity briefly stops while the cells repolarize. Watch for the SA node to fire first.'},
+  {id:'recovery',name:'SA node recovery',rate:48,pulse:true,treatment:'Do not shock',biphasic:0,monophasic:0,note:'The SA node, the fastest natural pacemaker, recovers first and regains control. Slow sinus beats with a P wave before each QRS emerge, then the rate settles into normal sinus rhythm.'},
+];
+export const isPostShock = (id: RhythmId) => postShockRhythms.some(r => r.id === id);
+export const getRhythm = (id: RhythmId) => [...rhythms, ...postShockRhythms].find(r => r.id === id)!;
 const g = (x: number, center: number, width: number, height: number) => height * Math.exp(-(((x-center)/width)**2));
 export function beatPhase(id: RhythmId, t: number) {
   const r = getRhythm(id);
@@ -24,6 +30,7 @@ export function beatPhase(id: RhythmId, t: number) {
 export function sampleWave(id: RhythmId, t: number): number {
   const p = beatPhase(id,t);
   if(id === 'asystole') return .008*Math.sin(t*17);
+  if(id === 'standstill') return .005*Math.sin(t*13);
   if(id === 'vf' || id === 'finevf') return (id === 'vf' ? .36 : .09)*(Math.sin(t*31)+.48*Math.sin(t*47)+.3*Math.sin(t*73));
   if(id === 'vt' || id === 'pvt') return g(p,.38,.13,1)-g(p,.61,.12,.65);
   const qrs = g(p,.4,.018,1.15)-g(p,.36,.018,.2)-g(p,.44,.023,.32);

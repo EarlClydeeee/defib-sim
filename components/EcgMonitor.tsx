@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { beatPhase, getRhythm, sampleWave, type RhythmId } from '@/lib/rhythms';
+import { beatPhase, getRhythm, isPostShock, sampleWave, type RhythmId } from '@/lib/rhythms';
 
 const motionQuery = '(prefers-reduced-motion: reduce)';
 function subscribeMotion(onChange: () => void) {
@@ -12,46 +12,91 @@ function subscribeMotion(onChange: () => void) {
 const readMotion = () => window.matchMedia(motionQuery).matches;
 const serverMotion = () => false;
 
-export default function EcgMonitor({ rhythm, sync = false, shocks = 0, hidden = false, onR }: {
-  rhythm: RhythmId; sync?: boolean; shocks?: number; hidden?: boolean; onR?: () => void;
+const pixelsPerSecond = 110;
+const spikeLength = .12;
+const rPhase = .4;
+type Segment = { start: number; rhythm: RhythmId };
+
+function segmentAt(segments: Segment[], t: number) {
+  for (let i = segments.length - 1; i > 0; i--) if (segments[i].start <= t) return segments[i];
+  return segments[0];
+}
+function shockSpike(dt: number) {
+  if (dt < .015) return dt / .015 * 1.7;
+  if (dt < .035) return 1.7 - (dt - .015) / .02 * 3.1;
+  return -1.4 * Math.exp(-(dt - .035) / .025);
+}
+
+export default function EcgMonitor({ rhythm, sync = false, shocks = 0, syncedShock = false, hidden = false, onR }: {
+  rhythm: RhythmId; sync?: boolean; shocks?: number; syncedShock?: boolean; hidden?: boolean; onR?: () => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const callback = useRef(onR);
-  const artifact = useRef(-100);
-  const priorShocks = useRef(shocks);
   const reduced = useSyncExternalStore(subscribeMotion, readMotion, serverMotion);
   const [playOverride, setPlayOverride] = useState<boolean | null>(null);
   const playing = playOverride ?? !reduced;
+  // One clock drives both the drawing and R-wave detection; its time is the strip's right edge.
+  // `view` is the right edge actually drawn, and stays frozen while the strip is paused.
+  const timeline = useRef({ clock: 0, view: 0, lastR: -10, segments: [{ start: 0, rhythm }] as Segment[], shockTimes: [] as number[], rhythm, shocks });
+  const live = useRef({ sync, playing, reduced });
 
   useEffect(() => { callback.current = onR; }, [onR]);
+  useEffect(() => { live.current = { sync, playing, reduced }; }, [sync, playing, reduced]);
+
   useEffect(() => {
-    if (priorShocks.current !== shocks) {
-      artifact.current = performance.now() / 1000;
-      priorShocks.current = shocks;
+    const line = timeline.current;
+    const shocked = shocks !== line.shocks;
+    const changed = rhythm !== line.rhythm;
+    if (!shocked && !changed) return;
+    let start = line.clock;
+    if (shocked) {
+      const at = syncedShock && line.clock - line.lastR < .25 ? line.lastR : line.clock;
+      line.shockTimes = [...line.shockTimes.slice(-3), at];
+      start = at + spikeLength;
     }
-  }, [shocks]);
+    if (changed) {
+      if (shocked || isPostShock(rhythm) || isPostShock(line.rhythm)) {
+        // Hand over at the end of the current beat so no complex is cut in half.
+        const current = segmentAt(line.segments, line.clock);
+        const rate = getRhythm(current.rhythm).rate;
+        if (!shocked && rate > 0) start = line.clock + (1 - beatPhase(current.rhythm, line.clock - current.start)) * 60 / rate;
+        line.segments = [...line.segments.filter(s => s.start < start).slice(-4), { start, rhythm }];
+      } else {
+        line.segments = [{ start: line.clock, rhythm }];
+      }
+    }
+    line.rhythm = rhythm;
+    line.shocks = shocks;
+    line.view = line.clock;
+  }, [rhythm, shocks, syncedShock]);
 
   useEffect(() => {
     const el = canvas.current;
     const ctx = el?.getContext('2d');
     if (!el || !ctx) return;
     let frame = 0;
-    let lastPhase = 0;
     let previousTime = performance.now() / 1000;
-    let elapsed = 0;
-    let lastBeatTime = 0;
-    const pixelsPerSecond = 110;
+    let beatSegment: Segment | null = null;
+    let lastPhase = 0;
 
     const draw = () => {
       const time = performance.now() / 1000;
       const delta = Math.min(time - previousTime, .1);
       previousTime = time;
-      // Keep synchronization timing active even when the visual strip is paused.
-      lastBeatTime += delta;
-      const phase = beatPhase(rhythm, lastBeatTime);
-      if (phase >= .4 && lastPhase < .4 && getRhythm(rhythm).rate > 0) callback.current?.();
+      const line = timeline.current;
+      const { sync, playing, reduced } = live.current;
+      line.clock += delta;
+      if (playing) line.view = line.clock;
+
+      const current = segmentAt(line.segments, line.clock);
+      const rate = getRhythm(current.rhythm).rate;
+      const phase = beatPhase(current.rhythm, line.clock - current.start);
+      if (current === beatSegment && rate > 0 && lastPhase < rPhase && phase >= rPhase) {
+        line.lastR = line.clock - (phase - rPhase) * 60 / rate;
+        callback.current?.();
+      }
+      beatSegment = current;
       lastPhase = phase;
-      if (playing) elapsed += delta;
 
       const width = el.clientWidth;
       const height = el.clientHeight;
@@ -64,23 +109,29 @@ export default function EcgMonitor({ rhythm, sync = false, shocks = 0, hidden = 
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
-      // A moving time window: every screen position receives a new sample each frame.
-      // Prefill the window so a complete strip is visible immediately.
-      const windowStart = elapsed;
+
+      const windowStart = line.view - width / pixelsPerSecond;
+      const valueAt = (t: number) => {
+        const shock = line.shockTimes.find(at => t >= at && t < at + spikeLength);
+        if (shock !== undefined) return shockSpike(t - shock);
+        const segment = segmentAt(line.segments, t);
+        return sampleWave(segment.rhythm, t - segment.start);
+      };
       const sampleStep = 1; // Keep narrow QRS complexes visible at high heart rates.
-      let previousPhase = beatPhase(rhythm, windowStart);
+      let previous = null as { segment: Segment; phase: number } | null;
       for (let x = 0; x < width - sampleStep; x += sampleStep) {
         const sampleTime = windowStart + x / pixelsPerSecond;
-        const value = sampleWave(rhythm, sampleTime);
-        const nextValue = sampleWave(rhythm, sampleTime + sampleStep / pixelsPerSecond);
-        ctx.strokeStyle = value > .85 ? '#c8102e' : '#1b1a17';
+        const value = valueAt(sampleTime);
+        const nextValue = valueAt(sampleTime + sampleStep / pixelsPerSecond);
+        ctx.strokeStyle = Math.abs(value) > .85 ? '#c8102e' : '#1b1a17';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x, height * .58 - value * height * .27);
         ctx.lineTo(x + sampleStep, height * .58 - nextValue * height * .27);
         ctx.stroke();
-        const currentPhase = beatPhase(rhythm, sampleTime);
-        if (sync && getRhythm(rhythm).rate > 0 && previousPhase < .4 && currentPhase >= .4) {
+        const segment = segmentAt(line.segments, sampleTime);
+        const samplePhase = beatPhase(segment.rhythm, sampleTime - segment.start);
+        if (sync && previous?.segment === segment && getRhythm(segment.rhythm).rate > 0 && previous.phase < rPhase && samplePhase >= rPhase) {
           ctx.fillStyle = '#0f766e';
           ctx.beginPath();
           ctx.moveTo(x - 4, 30);
@@ -88,27 +139,18 @@ export default function EcgMonitor({ rhythm, sync = false, shocks = 0, hidden = 
           ctx.lineTo(x, 39);
           ctx.fill();
         }
-        previousPhase = currentPhase;
+        previous = { segment, phase: samplePhase };
       }
-      if (time - artifact.current < .55) {
-        ctx.strokeStyle = '#c8102e';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(width - 40, height * .6);
-        ctx.lineTo(width - 30, 10);
-        ctx.lineTo(width - 20, height - 10);
-        ctx.lineTo(width - 10, height * .6);
-        ctx.stroke();
-        if (!reduced && playing) {
-          ctx.fillStyle = 'rgba(255,255,255,.45)';
-          ctx.fillRect(0, 0, width, height);
-        }
+      const lastShock = line.shockTimes[line.shockTimes.length - 1];
+      if (lastShock !== undefined && line.clock - lastShock < .35 && !reduced && playing) {
+        ctx.fillStyle = 'rgba(255,255,255,.45)';
+        ctx.fillRect(0, 0, width, height);
       }
       frame = requestAnimationFrame(draw);
     };
     frame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(frame);
-  }, [rhythm, sync, playing, reduced]);
+  }, []);
 
   const r = getRhythm(rhythm);
   return <section className="monitor" aria-label={hidden ? 'Unlabeled simulated ECG strip' : `${r.name} ECG`}>
